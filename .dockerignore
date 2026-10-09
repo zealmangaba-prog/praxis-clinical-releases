@@ -1,0 +1,13 @@
+cat << 'EOF' > .dockerignore
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+*.pdf
+downloads/
+*.pem
+private_key.pem
+scripts/
+EOF

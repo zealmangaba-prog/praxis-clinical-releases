@@ -1,0 +1,105 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# Asymmetric Cryptographic Secrets (CRITICAL: Never commit private keys)
+*.pem
+*.key
+private_key.pem
+
+# Admin issuance & distribution scripts (Keep private to issuer)
+scripts/generate_license_keys.py
+
+# Generated Clinical Artifacts & Local Exports (Zero disk persistence compliance)
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# Unit testing & test coverage caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local IDE & OS metadata
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker local overrides and build dumps
+docker-compose.override.yml
+*.log
+
+# Security & Licensing Keys
+private_key.pem
+generate_trial_key*
+*.key
+*.pem
+!public_key.pem
+
+# Environment & Build Outputs
+venv/
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+.DS_Store
+*.dmgprivate_key.pem
+generate_trial_key*
+*.key
+*.pem
+!public_key.pem
+venv/
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+.DS_Store
+*.dmg
+*.zip
+clinical-report-generator-pilot*/
+releases/
+trial_ledger.db

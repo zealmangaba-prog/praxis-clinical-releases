@@ -1,0 +1,18 @@
+services:
+  clinical-app:
+    build: .
+    container_name: clinical_report_generator
+    ports:
+      - "127.0.0.1:8503:8501"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=256M
+      - /root/.cache:rw,size=512M
+      - /root/.EasyOCR:rw,size=512M
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
