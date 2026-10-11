@@ -1,12 +1,34 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
+# 1. Collect Streamlit and its metadata
+streamlit_datas, streamlit_binaries, streamlit_hiddenimports = collect_all('streamlit')
+extra_metadata = copy_metadata('streamlit')
+
+# 2. Collect Cryptography (used by core.license_guard)
+crypto_datas, crypto_binaries, crypto_hiddenimports = collect_all('cryptography')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=[('core', 'core')],
-    hiddenimports=['reportlab.platypus', 'reportlab.lib.styles', 'PIL', 'pypdf'],
+    binaries=streamlit_binaries + crypto_binaries,
+    datas=[
+        ('core', 'core'),
+        ('app.py', '.'),
+        ('public_key.pem', '.')
+    ] + streamlit_datas + crypto_datas + extra_metadata,
+    hiddenimports=[
+        'docx',
+        'reportlab.platypus',
+        'reportlab.lib.styles',
+        'PIL',
+        'pypdf',
+        'cryptography',
+        'cryptography.hazmat.primitives.serialization',
+        'cryptography.hazmat.primitives.asymmetric.padding',
+        'cryptography.hazmat.primitives.hashes',
+        'cryptography.hazmat.backends.default_backend',
+    ] + streamlit_hiddenimports + crypto_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
