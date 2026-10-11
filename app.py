@@ -522,27 +522,36 @@ with col_left:
     include_sticker = st.checkbox("Include Medical Aid Claim Voucher / Sticker", value=False)
     sticker_data = None
 
-    if include_sticker:
+    if include_sticker: 
+        # Resolve variables safely if defined earlier, otherwise provide clean defaults
+        _default_scheme = locals().get("scheme_name") or st.session_state.get("scheme_name", "")
+        _default_mem_no = locals().get("membership_no") or st.session_state.get("membership_no", "")
+        _default_dep = locals().get("dependant_code") or st.session_state.get("dependant_code", "00")
+        _default_patient = locals().get("patient_name") or st.session_state.get("patient_name", "")
+        _default_is_pmb = locals().get("is_pmb_default", True)
+        _default_pre_auth = locals().get("pre_auth") or st.session_state.get("pre_auth", "")
+
         with st.container(border=True):
             st.markdown("##### 📋 Medical Aid Claim Voucher Sticker")
             stk_c1, stk_c2 = st.columns(2)
             with stk_c1:
-                stk_scheme = st.text_input("Scheme Name", value=scheme_name)
-                stk_mem_no = st.text_input("Membership Number", value=membership_no)
-                stk_dep = st.text_input("Dependant Code", value=dependant_code)
+                stk_scheme = st.text_input("Scheme Name", value=_default_scheme)
+                stk_mem_no = st.text_input("Membership Number", value=_default_mem_no)
+                stk_dep = st.text_input("Dependant Code", value=_default_dep)
             with stk_c2:
-                main_member = st.text_input("Main Member Initial/Surname", value=f"{patient_name} (Self)")
-                is_pmb = st.checkbox("Prescribed Minimum Benefit (PMB)", value=is_pmb_default)
-                pre_auth = st.text_input("Pre-Authorisation Ref", placeholder="e.g. AUTH-88219")
+                main_member_val = f"{_default_patient} (Self)" if _default_patient else ""
+                main_member = st.text_input("Main Member Initial/Surname", value=main_member_val)
+                pre_auth = st.text_input("Pre-Authorisation Number (if issued)", value=_default_pre_auth)
+                is_pmb = st.checkbox("Prescribed Minimum Benefit (PMB)", value=_default_is_pmb)
 
-            sticker_data = {
-                "scheme": stk_scheme,
-                "membership_no": stk_mem_no,
-                "dependant_code": stk_dep,
-                "main_member": main_member,
-                "is_pmb": is_pmb,
-                "pre_auth": pre_auth,
-            }
+        sticker_data = {
+            "scheme": stk_scheme,
+            "membership_no": stk_mem_no,
+            "dependant_code": stk_dep,
+            "main_member": main_member,
+            "pre_auth": pre_auth,
+            "is_pmb": is_pmb
+        }
 
 # === COLUMN 2: REVIEW, CUSTOMIZE & EXPORT ===
 with col_right:
@@ -558,9 +567,15 @@ with col_right:
     session_dates = []
     curr_date = start_date
     while len(session_dates) < session_count:
-        if curr_date.weekday() < 5:
-            session_dates.append(curr_date)
-        curr_date += datetime.timedelta(days=7)
+        # If start date falls on a weekend, shift to the upcoming Monday
+# Check if start date falls on a weekend, roll forward to Monday
+        if curr_date.weekday() >= 5:
+            curr_date += datetime.timedelta(days=(7 - curr_date.weekday()))
+
+        session_dates = [
+            curr_date + datetime.timedelta(days=7 * i)
+            for i in range(int(session_count))
+        ]
 
     # GENERATE / RE-SYNTHESIZE BUTTON
     if st.button("🔄 Generate / Re-synthesize Report Content", type="primary", use_container_width=True):
