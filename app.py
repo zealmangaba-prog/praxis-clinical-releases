@@ -7,8 +7,15 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
+
 from core.medical_aid_presets import SCHEME_PRESETS, get_scheme_preset
 from core.clinical_logic import SCOPE_GUIDELINES, get_scope_guidelines, validate_scope, synthesize_clinical_narrative
+from core.clinical_copilot import (
+    synthesize_treatment_plan,
+    synthesize_session_notes,
+    synthesize_recommendation,
+    _resolve_modality_profile
+)
 import core.license_guard as license_guard
 from core.pdf_builder import build_clinical_pdf
 
@@ -44,7 +51,44 @@ if not st.session_state.license_active:
     st.stop()
 
 # ==============================================================================
-# 1. WORD (.DOCX) STYLING ENGINE
+# 1. HELPER FOR DYNAMIC TREATMENT PLAN TEXT
+# ==============================================================================
+
+def _build_dynamic_treatment_plan_fields(modality: str, symptoms: list, req_sessions: int) -> dict:
+    """
+    Uses clinical_copilot's modality engine to build modality-specific
+    Treatment Plan goals, interventions, and measurable outcomes.
+    """
+    plan_steps = synthesize_treatment_plan(modality, symptoms, total_sessions=req_sessions)
+    profile = _resolve_modality_profile(modality)
+    
+    # Extract unique phase goals across the requested sessions
+    goal_lines = []
+    for step in plan_steps:
+        line = f"Session {step['session_num']} ({step['phase']}): {step['session_goal']}"
+        goal_lines.append(line)
+    
+    # Extract distinct modality-specific outcomes
+    unique_outcomes = []
+    for step in plan_steps:
+        if step["expected_outcome"] not in unique_outcomes:
+            unique_outcomes.append(f"• {step['expected_outcome']}")
+
+    interventions_summary = (
+        f"• Primary Theoretical Framework: {profile['framework']}\n"
+        f"• Intake & Baseline Protocol: {profile['intake_goal']}\n"
+        f"• Core Therapeutic Mechanisms: {'; '.join(g.format(symptom=symptoms[0] if symptoms else 'presenting distress') for g in profile['session_goals'][:3])}\n"
+        f"• Relapse Prevention & Termination: {profile['termination_goal']}"
+    )
+
+    return {
+        "goals": "\n".join(goal_lines),
+        "interventions": interventions_summary,
+        "outcomes": "\n".join(unique_outcomes)
+    }
+
+# ==============================================================================
+# 2. WORD (.DOCX) STYLING ENGINE
 # ==============================================================================
 
 def _set_cell_background(cell, hex_color: str):
@@ -109,9 +153,7 @@ def build_docx_report(
     r_sub.font.size = Pt(9.5)
     r_sub.font.color.rgb = RGBColor(71, 85, 105)
 
-    # =========================================================================
-    # 👇 STEP 2 GOES HERE (REPLACE OLD DEMOGRAPHICS BLOCK / TABLE WITH THIS):
-    # =========================================================================
+    # Patient Demographics Block
     doc_ref_str = patient.get('doctor', 'N/A')
     if patient.get('doctor_pr'):
         doc_ref_str += f" (BHF: {patient['doctor_pr']})"
@@ -131,9 +173,8 @@ def build_docx_report(
         f"Dependant Code: {patient.get('dependant_code', '00')}\n"
         f"{care_prog_line}"
     ).font.size = Pt(9)
-    # =========================================================================
 
-    # Optional Medical Aid Claim Voucher follows immediately below:
+    # Optional Medical Aid Claim Voucher
     if sticker_data:
         tbl_stk = doc.add_table(rows=4, cols=2)
         tbl_stk.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -189,7 +230,6 @@ def build_docx_report(
 
     # 2. Section Based on Report Type
     if report_type == "Clinical Progress Report":
-        # Clinical Trajectory
         h2 = doc.add_paragraph()
         h2.paragraph_format.space_before = Pt(8)
         h2.paragraph_format.space_after = Pt(2)
@@ -199,7 +239,6 @@ def build_docx_report(
         p_traj.paragraph_format.space_after = Pt(6)
         p_traj.add_run(content_data.get("trajectory", "")).font.size = Pt(9.5)
 
-        # Medical Aid Compliance: Adherence & Barriers
         p_adh = doc.add_paragraph()
         p_adh.paragraph_format.space_after = Pt(4)
         r_adh_label = p_adh.add_run("Treatment Adherence & Engagement: ")
@@ -224,7 +263,7 @@ def build_docx_report(
         tbl_sess.autofit = False
         _set_table_borders(tbl_sess, border_color="CBD5E1", border_sz="4")
 
-        col_widths = [Inches(0.5), Inches(1.0), Inches(0.8), Inches(1.8), Inches(2.7)]
+        col_widths = [Inches(0.45), Inches(0.95), Inches(0.75), Inches(1.65), Inches(3.0)]
         headers = ["#", "Date", "Tariff", "Symptom Target", "Clinical Observations & Content"]
 
         for idx, name in enumerate(headers):
@@ -240,7 +279,7 @@ def build_docx_report(
 
         for r_idx, s in enumerate(sessions, start=1):
             row = tbl_sess.rows[r_idx]
-            vals = [str(s["num"]), s["date"], billing["tariff_code"], s["symptom_target"], s["content"]]
+            vals = [str(s["num"]), str(s["date"]), billing["tariff_code"], s["symptom_target"], s["content"]]
             for c_idx, val in enumerate(vals):
                 cell = row.cells[c_idx]
                 cell.width = col_widths[c_idx]
@@ -278,19 +317,22 @@ def build_docx_report(
             f"Discharge Recommendations:\n{content_data.get('discharge_plan', '')}"
         ).font.size = Pt(9.5)
 
-    # 3. Overall Recommendation & Motivation
+    # 3. Overall Recommendation & Motivation (Powered by clinical_copilot)
     h3 = doc.add_paragraph()
     h3.paragraph_format.space_before = Pt(12)
     h3.paragraph_format.space_after = Pt(2)
     h3.add_run("3. Professional Motivation & Authorisation").bold = True
 
+    dynamic_rec = synthesize_recommendation(
+        discipline=practitioner['designation'],
+        modality=patient['modality'],
+        symptoms=patient['symptoms'],
+        tariff_code=billing['tariff_code']
+    )
+
     p_rec = doc.add_paragraph()
     p_rec.paragraph_format.space_after = Pt(24)
-    p_rec.add_run(
-        f"In accordance with clinical protocol under {practitioner['designation']}, "
-        f"therapeutic services under tariff {billing['tariff_code']} are motivated "
-        f"to maintain psychosocial stability, develop resilience, and prevent regression."
-    ).font.size = Pt(9.5)
+    p_rec.add_run(dynamic_rec).font.size = Pt(9.5)
 
     # Practitioner Signature Block
     p_sig = doc.add_paragraph()
@@ -307,7 +349,7 @@ def build_docx_report(
     return target_io
 
 # ==============================================================================
-# 2. STREAMLIT UI DASHBOARD
+# 3. STREAMLIT UI DASHBOARD
 # ==============================================================================
 
 st.markdown("### 🔒 Praxis Clinical")
@@ -324,7 +366,6 @@ report_type = st.radio(
 )
 
 st.divider()
-
 
 # Patient Core Demographics Header Row
 hdr_c1, hdr_c2, hdr_c3 = st.columns(3)
@@ -403,7 +444,6 @@ with col_left:
     st.subheader("1. Diagnostic & Symptom Cluster Matrix")
 
     icd10 = st.selectbox(
-        
         "Diagnostic Category (ICD-10 Primary):",
         [
             # Bereavement, Loss & Grief Reactions
@@ -447,7 +487,6 @@ with col_left:
             "Z55.9 - Problems Related to Education and Literacy, Unspecified"
         ]
     )
-    
 
     is_pmb_default = "PMB Eligible" in icd10
     if is_pmb_default:
@@ -508,7 +547,19 @@ with col_left:
 
     st.markdown("---")
     st.markdown("**Therapeutic Modality & Billing Tariff:**")
-    modality = st.selectbox("Primary Therapeutic Modality:", scope_info.get("modalities", ["Cognitive Behavioural Framework"]))
+    
+    # Combine scope modalities with core clinical_copilot modalities so all 5 frameworks are accessible
+    core_modalities = [
+        "Cognitive Behavioral Therapy (CBT)",
+        "Acceptance and Commitment Therapy (ACT)",
+        "Dialectical Behavior Therapy (DBT)",
+        "Psychodynamic Psychotherapy",
+        "Solution-Focused Brief Therapy (SFBT)"
+    ]
+    scope_mods = scope_info.get("modalities", [])
+    combined_modalities = core_modalities + [m for m in scope_mods if m not in core_modalities]
+    
+    modality = st.selectbox("Primary Therapeutic Modality:", combined_modalities)
     
     tariff_choice = st.selectbox(
         "Applicable Billing Tariff:",
@@ -522,27 +573,19 @@ with col_left:
     include_sticker = st.checkbox("Include Medical Aid Claim Voucher / Sticker", value=False)
     sticker_data = None
 
-    if include_sticker: 
-        # Resolve variables safely if defined earlier, otherwise provide clean defaults
-        _default_scheme = locals().get("scheme_name") or st.session_state.get("scheme_name", "")
-        _default_mem_no = locals().get("membership_no") or st.session_state.get("membership_no", "")
-        _default_dep = locals().get("dependant_code") or st.session_state.get("dependant_code", "00")
-        _default_patient = locals().get("patient_name") or st.session_state.get("patient_name", "")
-        _default_is_pmb = locals().get("is_pmb_default", True)
-        _default_pre_auth = locals().get("pre_auth") or st.session_state.get("pre_auth", "")
-
+    if include_sticker:
         with st.container(border=True):
             st.markdown("##### 📋 Medical Aid Claim Voucher Sticker")
             stk_c1, stk_c2 = st.columns(2)
             with stk_c1:
-                stk_scheme = st.text_input("Scheme Name", value=_default_scheme)
-                stk_mem_no = st.text_input("Membership Number", value=_default_mem_no)
-                stk_dep = st.text_input("Dependant Code", value=_default_dep)
+                stk_scheme = st.text_input("Scheme Name", value=preset_info["admin_name"])
+                stk_mem_no = st.text_input("Membership Number", value=membership_no)
+                stk_dep = st.text_input("Dependant Code", value=dependant_code)
             with stk_c2:
-                main_member_val = f"{_default_patient} (Self)" if _default_patient else ""
+                main_member_val = f"{patient_name} (Self)" if patient_name else ""
                 main_member = st.text_input("Main Member Initial/Surname", value=main_member_val)
-                pre_auth = st.text_input("Pre-Authorisation Number (if issued)", value=_default_pre_auth)
-                is_pmb = st.checkbox("Prescribed Minimum Benefit (PMB)", value=_default_is_pmb)
+                pre_auth = st.text_input("Pre-Authorisation Number (if issued)", value="")
+                is_pmb = st.checkbox("Prescribed Minimum Benefit (PMB)", value=is_pmb_default)
 
         sticker_data = {
             "scheme": stk_scheme,
@@ -564,21 +607,17 @@ with col_right:
     with d_col2:
         session_count = st.slider("Documented Sessions (Up to 20):", min_value=1, max_value=20, value=4)
 
-    session_dates = []
     curr_date = start_date
-    while len(session_dates) < session_count:
-        # If start date falls on a weekend, shift to the upcoming Monday
-# Check if start date falls on a weekend, roll forward to Monday
-        if curr_date.weekday() >= 5:
-            curr_date += datetime.timedelta(days=(7 - curr_date.weekday()))
+    if curr_date.weekday() >= 5:
+        curr_date += datetime.timedelta(days=(7 - curr_date.weekday()))
 
-        session_dates = [
-            curr_date + datetime.timedelta(days=7 * i)
-            for i in range(int(session_count))
-        ]
+    session_dates = [
+        (curr_date + datetime.timedelta(days=7 * i)).strftime("%Y-%m-%d")
+        for i in range(int(session_count))
+    ]
 
-    # GENERATE / RE-SYNTHESIZE BUTTON
-    if st.button("🔄 Generate / Re-synthesize Report Content", type="primary", use_container_width=True):
+    # Helper function to synchronize both clinical_logic and clinical_copilot outputs
+    def _run_full_synthesis():
         generated = synthesize_clinical_narrative(
             designation=designation,
             icd10=icd10,
@@ -587,25 +626,38 @@ with col_right:
             session_count=session_count,
             dates=session_dates
         )
+        # Override session notes with the rich multi-bullet clinical_copilot engine
+        rich_sessions = synthesize_session_notes(
+            discipline=designation,
+            modality=modality,
+            selected_symptoms=selected_symptoms,
+            service_dates=session_dates
+        )
         st.session_state["dyn_trajectory"] = generated["trajectory"]
         st.session_state["dyn_adherence"] = generated["adherence"]
         st.session_state["dyn_barriers"] = generated["barriers"]
-        st.session_state["dyn_sessions"] = generated["sessions"]
+        st.session_state["dyn_sessions"] = rich_sessions
 
-    # Initial Fallback State
-    if "dyn_trajectory" not in st.session_state:
-        init_gen = synthesize_clinical_narrative(
-            designation=designation,
-            icd10=icd10,
-            modality=modality,
-            symptoms=selected_symptoms,
-            session_count=session_count,
-            dates=session_dates
-        )
-        st.session_state["dyn_trajectory"] = init_gen["trajectory"]
-        st.session_state["dyn_adherence"] = init_gen["adherence"]
-        st.session_state["dyn_barriers"] = init_gen["barriers"]
-        st.session_state["dyn_sessions"] = init_gen["sessions"]
+        # Clear cached session widget keys so Streamlit renders the newly synthesized text
+        for k in list(st.session_state.keys()):
+            if k.startswith("target_") or k.startswith("note_"):
+                del st.session_state[k]
+
+        # Update dynamic Treatment Plan fields
+        tp_fields = _build_dynamic_treatment_plan_fields(modality, selected_symptoms, session_count)
+        st.session_state["tp_goals"] = tp_fields["goals"]
+        st.session_state["tp_interventions"] = tp_fields["interventions"]
+        st.session_state["tp_outcomes"] = tp_fields["outcomes"]
+        st.session_state["last_modality"] = modality
+
+    # Auto-trigger synthesis on initial load OR whenever the user switches modality
+    if "dyn_trajectory" not in st.session_state or st.session_state.get("last_modality") != modality:
+        _run_full_synthesis()
+
+    # GENERATE / RE-SYNTHESIZE BUTTON
+    if st.button("🔄 Generate / Re-synthesize Report Content", type="primary", use_container_width=True):
+        _run_full_synthesis()
+        st.rerun()
 
     content_data = {}
 
@@ -629,7 +681,7 @@ with col_right:
                     st.markdown(f"**Session {sess['num']}** | `{sess['date']}`")
                     target_str = st.text_input(f"Target (S{i})", value=sess["symptom_target"], key=f"target_{i}")
                 with s_c2:
-                    content_str = st.text_area(f"Clinical Note (S{i})", value=sess["content"], key=f"note_{i}", height=70)
+                    content_str = st.text_area(f"Clinical Note (S{i})", value=sess["content"], key=f"note_{i}", height=110)
 
                 scope_violations = validate_scope(designation, content_str)
                 if scope_violations:
@@ -653,21 +705,25 @@ with col_right:
         st.markdown("---")
         st.markdown("**Treatment Plan & Authorization Parameters:**")
         
-        req_sessions = st.number_input("Requested Sessions for Authorization:", min_value=1, max_value=20, value=6)
+        req_sessions = st.number_input("Requested Sessions for Authorization:", min_value=1, max_value=20, value=int(session_count))
+        
+        # Dynamically rebuild plan if requested session count or symptoms changed
+        tp_dynamic = _build_dynamic_treatment_plan_fields(modality, selected_symptoms, req_sessions)
+
         goals = st.text_area(
-            "Goals of Sessions:",
-            value=f"1. Symptom reduction targeting {', '.join(selected_symptoms[:2])}.\n2. Development of emotional regulation, meaning reconstruction, and coping resilience.\n3. Restoration of baseline psychosocial functioning.",
-            height=80
+            "Goals of Sessions (Modality-Aligned):",
+            value=tp_dynamic["goals"],
+            height=130
         )
         interventions = st.text_area(
             "Interventions Used / Planned:",
-            value=f"Structured {modality} protocols including psycho-education, cognitive/emotional reappraisal, Dual-Process grief tracking, and coping integration.",
-            height=80
+            value=tp_dynamic["interventions"],
+            height=115
         )
         outcomes = st.text_area(
             "Expected Measurable Outcomes:",
-            value="Observed reduction on standardized distress markers, improved engagement in daily occupations, and stabilized affect.",
-            height=80
+            value=tp_dynamic["outcomes"],
+            height=115
         )
         content_data = {
             "requested_sessions": req_sessions,
@@ -679,14 +735,22 @@ with col_right:
     else:  # Clinical Summary / Discharge Note
         st.markdown("---")
         st.markdown("**Clinical Summary & Discharge Evaluation:**")
+        profile = _resolve_modality_profile(modality)
         summary_text = st.text_area(
             "Course of Treatment & Summary:",
-            value=f"Client completed therapeutic cycle targeting {icd10}. Observable stabilization achieved across {', '.join(selected_symptoms[:2])}.",
+            value=(
+                f"Client completed a structured therapeutic cycle under {profile['framework']} targeting {icd10}. "
+                f"Observable clinical stabilization achieved across {', '.join(selected_symptoms[:3])}. "
+                f"{profile['termination_outcome']}"
+            ),
             height=100
         )
         discharge_plan = st.text_area(
             "Discharge Recommendations / Relapse Prevention:",
-            value="Discharged with maintenance coping strategies. Client educated on self-referral procedures should acute bereavement or distress triggers resurface.",
+            value=(
+                f"{profile['termination_goal']} Client educated on relapse indicators and self-referral "
+                f"protocols should acute stressors or symptom clusters resurface."
+            ),
             height=80
         )
         content_data = {
@@ -702,6 +766,7 @@ with col_right:
         "patient_name": patient_name,
         "case_number": case_number,
         "doctor": referring_doctor,
+        "doctor_pr": referring_doctor_pr,
         "scheme": preset_info["admin_name"],
         "membership_no": membership_no,
         "dependant_code": dependant_code,
@@ -718,7 +783,7 @@ with col_right:
     }
 
     date_str = datetime.date.today().strftime('%Y%m%d')
-    file_base = f"{report_type.replace(' ', '_')}_{case_number}_{date_str}"
+    file_base = f"{report_type.replace(' ', '_').replace('/', '-')}_{case_number}_{date_str}"
 
     exp_col1, exp_col2 = st.columns(2)
     with exp_col1:
@@ -757,7 +822,7 @@ with col_right:
             use_container_width=True
         )
 
-        # Scheme-Specific Submission Helper Card
+    # Scheme-Specific Submission Helper Card
     st.markdown("---")
     with st.expander("✉️ Scheme Submission Instructions & Routing Details", expanded=True):
         subj = preset_info["submission_subject"].format(
