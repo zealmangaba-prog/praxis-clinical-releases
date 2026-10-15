@@ -20,7 +20,7 @@ jobs:
           - os: macos-latest
             artifact_name: Praxis_Clinical_macOS.dmg
           - os: windows-latest
-            artifact_name: dist/Praxis_Clinical.exe
+            artifact_name: Praxis_Clinical_Windows.zip
 
     steps:
       - name: Checkout Code
@@ -36,7 +36,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller pywin32
+          pip install pyinstaller
+
+      - name: Install Windows-Specific Dependencies
+        if: runner.os == 'Windows'
+        run: |
+          pip install pywin32
 
       # --- macOS Build Step ---
       - name: Build macOS App & DMG
@@ -49,12 +54,19 @@ jobs:
             app.py
           hdiutil create -volname "Praxis Clinical" -srcfolder "dist/Praxis Clinical.app" -ov -format UDZO "Praxis_Clinical_macOS.dmg"
 
-      # --- Windows Build Step (Runs in cmd to ignore stderr warnings) ---
+      # --- Windows Build Step ---
       - name: Build Windows Executable
         if: runner.os == 'Windows'
-        shell: cmd
         run: |
-          pyinstaller --clean --noconfirm --onefile --windowed --name "Praxis_Clinical" --add-data "core;core" --collect-all streamlit app.py
+          pyinstaller --clean --noconfirm --onedir --windowed `
+            --name "Praxis_Clinical" `
+            --add-data "core;core" `
+            --collect-all streamlit `
+            --exclude-module torch `
+            --exclude-module scipy `
+            --exclude-module pytest `
+            app.py
+          Compress-Archive -Path "dist/Praxis_Clinical/*" -DestinationPath "Praxis_Clinical_Windows.zip"
 
       # --- Upload Assets to Release ---
       - name: Upload Binary to GitHub Release
