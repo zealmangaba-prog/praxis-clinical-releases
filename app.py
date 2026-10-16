@@ -335,13 +335,33 @@ def build_docx_report(
     p_rec.add_run(dynamic_rec).font.size = Pt(9.5)
 
     # Practitioner Signature Block
-    p_sig = doc.add_paragraph()
-    p_sig.add_run(
-        f"____________________________________\n"
-        f"{practitioner['name']}\n"
-        f"{practitioner['designation']}\n"
-        f"BHF Practice No: {practitioner['practice_number']}"
-    ).font.size = Pt(9.5)
+    sig_data = practitioner.get("signature")
+    if sig_data:
+        try:
+            doc.add_picture(io.BytesIO(sig_data), width=Inches(1.8))
+            p_sig = doc.add_paragraph()
+            p_sig.add_run(
+                f"{practitioner['name']}\n"
+                f"{practitioner['designation']}\n"
+                f"BHF Practice No: {practitioner['practice_number']}"
+            ).font.size = Pt(9.5)
+        except Exception as e:
+            print(f"Word signature error: {e}")
+            p_sig = doc.add_paragraph()
+            p_sig.add_run(
+                f"____________________________________\n"
+                f"{practitioner['name']}\n"
+                f"{practitioner['designation']}\n"
+                f"BHF Practice No: {practitioner['practice_number']}"
+            ).font.size = Pt(9.5)
+    else:
+        p_sig = doc.add_paragraph()
+        p_sig.add_run(
+            f"____________________________________\n"
+            f"{practitioner['name']}\n"
+            f"{practitioner['designation']}\n"
+            f"BHF Practice No: {practitioner['practice_number']}"
+        ).font.size = Pt(9.5)
 
     target_io = io.BytesIO()
     doc.save(target_io)
@@ -413,10 +433,13 @@ with st.sidebar:
     practitioner_name = st.text_input("Practitioner Full Name:", value="Dr. J. Doe")
     practitioner_address = st.text_area("Physical / Practice Address:", value="Suite 4, Mediclinic Building, Sandton", height=70)
     practitioner_pr = st.text_input("Practice Number (BHF):", value=st.session_state.practice_number)
+    practice_phone = st.text_input("Practice Contact Number:", value="+27 11 123 4567")
+    practice_email = st.text_input("Practice Email Address:", value="practitioner@practice.com")
+
 
     st.markdown("**Electronic Signature:**")
     sig_file = st.file_uploader("Upload Signature (PNG / JPG):", type=["png", "jpg", "jpeg"])
-    sig_bytes = sig_file.read() if sig_file else None
+    sig_bytes = sig_file.getvalue() if sig_file is not None else None
     if sig_bytes:
         st.image(sig_bytes, width=150, caption="Loaded Signature")
 
@@ -433,7 +456,10 @@ practitioner_info = {
     "name": practitioner_name,
     "designation": designation,
     "address": practitioner_address,
-    "practice_number": practitioner_pr
+    "practice_number": practitioner_pr,
+    "phone": practice_phone,
+    "email": practice_email,
+    "signature": sig_bytes,
 }
 
 # --- TWO COLUMN CLINICAL WORKSPACE ---
@@ -444,49 +470,103 @@ with col_left:
     st.subheader("1. Diagnostic & Symptom Cluster Matrix")
 
     icd10 = st.selectbox(
-        "Diagnostic Category (ICD-10 Primary):",
+        "Diagnostic Category (ICD-10 Primary - SA MIT Standard):",
         [
-            # Bereavement, Loss & Grief Reactions
-            "Z63.4 - Disappearance and death of family member (Uncomplicated Bereavement)",
-            "F43.8 - Other reactions to severe stress (Prolonged Grief Reaction)",
-            "F43.21 - Adjustment Disorder with Depressed Mood secondary to Loss",
-            "F43.22 - Adjustment Disorder with Anxious Mood secondary to Loss",
-            "F43.23 - Adjustment Disorder with Mixed Anxiety and Depressed Mood",
+            # Substance Use, Abuse & Dependence Disorders
+            "F10.1 - Harmful Use of Alcohol",
+            "F10.2 - Alcohol Dependence Syndrome",
+            "F11.1 - Harmful Use of Opioids",
+            "F11.2 - Opioid Dependence Syndrome",
+            "F12.1 - Harmful Use of Cannabis",
+            "F12.2 - Cannabis Dependence Syndrome",
+            "F13.1 - Harmful Use of Sedatives or Hypnotics",
+            "F13.2 - Sedative or Hypnotic Dependence Syndrome",
+            "F14.1 - Harmful Use of Cocaine",
+            "F14.2 - Cocaine Dependence Syndrome",
+            "F15.1 - Harmful Use of Stimulants (Amphetamines, etc.)",
+            "F15.2 - Stimulant Dependence Syndrome",
+            "F16.1 - Harmful Use of Hallucinogens",
+            "F17.1 - Harmful Use of Nicotine",
+            "F18.1 - Harmful Use of Volatile Solvents",
+            "F19.1 - Harmful Use of Multiple Substances",
+            "F19.2 - Dependence Syndrome due to Multiple Substances",
+            
+            # Bereavement, Loss & Adjustment Reactions (SA 4-Character Standard)
+            "F43.2 - Adjustment Disorder: Depressed Mood Secondary to Loss",
+            "F43.2 - Adjustment Disorder: Anxious Mood Secondary to Stress/Loss",
+            "F43.2 - Adjustment Disorder: Mixed Anxiety and Depressed Mood",
+            "F43.2 - Adjustment Disorder: Mixed Disturbance of Emotions and Conduct",
+            "F43.8 - Other Reactions to Severe Stress (Prolonged Grief Reaction)",
+            "Z63.4 - Disappearance and Death of Family Member (Uncomplicated Bereavement)",
 
-            # Trauma & Stressor-Related Disorders
-            "F43.10 - Post-Traumatic Stress Disorder (PTSD - PMB Eligible)",
-            "F43.0 - Acute Stress Reaction",
+            # Trauma & Acute Stressor-Related Disorders
+            "F43.1 - Post-Traumatic Stress Disorder (PTSD - PMB Eligible)",
+            "F43.0 - Acute Stress Reaction (PMB Eligible)",
+            "F43.2 - Adjustment Disorder with Mixed Anxiety and Depressed Mood (PMB Eligible)",
+            "F43.8 - Other Specified Reactions to Severe Stress (PMB Eligible)",
+            "F43.9 - Reaction to Severe Stress, Unspecified (PMB Eligible)",
 
-            # Mood & Depressive Spectrum Disorders
+            # Mood, Depressive & Bipolar Spectrum Disorders
             "F32.0 - Mild Depressive Episode",
             "F32.1 - Moderate Depressive Episode (PMB Eligible)",
             "F32.2 - Severe Depressive Episode without Psychotic Symptoms (PMB Eligible)",
             "F33.1 - Recurrent Depressive Disorder, Current Episode Moderate (PMB Eligible)",
+            "F33.2 - Recurrent Depressive Disorder, Current Episode Severe without Psychotic Symptoms (PMB Eligible)",
             "F34.1 - Dysthymia / Persistent Depressive Disorder",
+            "F31.3 - Bipolar Affective Disorder, Current Episode Mild or Moderate Depression (PMB Eligible)",
+            "F31.4 - Bipolar Affective Disorder, Current Episode Severe Depression without Psychotic Symptoms (PMB Eligible)",
+            "F31.6 - Bipolar Affective Disorder, Current Episode Mixed (PMB Eligible)",
             "F31.9 - Bipolar Affective Disorder, Unspecified (PMB Eligible)",
 
-            # Anxiety, Phobic & Somatoform Presentations
+            # Anxiety, Phobic, Obsessive & Somatoform Presentations
             "F41.1 - Generalized Anxiety Disorder (GAD)",
-            "F41.0 - Panic Disorder without Agoraphobia",
+            "F41.0 - Panic Disorder [Episodic Paroxysmal Anxiety]",
             "F40.1 - Social Phobia / Social Anxiety Disorder",
+            "F40.2 - Specific (Isolated) Phobias",
+            "F41.2 - Mixed Anxiety and Depressive Disorder",
+            "F41.8 - Other Specified Anxiety Disorders",
+            "F41.9 - Anxiety Disorder, Unspecified",
             "F42.2 - Mixed Obsessional Thoughts and Acts (OCD - PMB Eligible)",
-            "F45.0 - Somatization Disorder / Persistent Somatoform Pain Disorder",
+            "F45.0 - Somatization Disorder",
+            "F45.1 - Undifferentiated Somatoform Disorder",
+            "F45.2 - Hypochondriacal Disorder",
+            "F45.3 - Somatoform Autonomic Dysfunction",
+            "F45.4 - Persistent Somatoform Pain Disorder",
+            "F45.8 - Other Somatoform Disorders",
+            "F45.9 - Somatoform Disorder, Unspecified",
+            "F50.0 - Anorexia Nervosa",
+            "F50.2 - Bulimia Nervosa",
+            "F50.8 - Other Eating Disorders",
+            "F50.9 - Eating Disorder, Unspecified",
+            "F51.0 - Nonorganic Insomnia",
+            "F51.1 - Nonorganic Hypersomnia",
 
             # Neurodevelopmental, Child & Educational Presentations
-            "F90.0 - Attention-Deficit Hyperactivity Disorder (ADHD, Inattentive Type)",
-            "F90.2 - Attention-Deficit Hyperactivity Disorder (ADHD, Combined Type)",
+            "F90.0 - Disturbance of Activity and Attention (ADHD, Inattentive/Combined)",
+            "F90.1 - Hyperkinetic Conduct Disorder (ADHD with Conduct Disturbance)",
+            "F80.0 - Specific Speech Articulation Disorder",
             "F81.0 - Specific Reading Disorder (Dyslexia)",
+            "F81.2 - Specific Disorder of Arithmetical Skills (Dyscalculia)",
             "F91.3 - Oppositional Defiant Disorder (ODD)",
             "F93.0 - Separation Anxiety Disorder of Childhood",
+            "F95.1 - Chronic Motor or Vocal Tic Disorder",
+            "F95.2 - Combined Vocal and Multiple Motor Tic Disorder [Tourette]",
+            "F98.8 - Other Specified Behavioural and Emotional Disorders with Onset in Childhood",
+            
 
-            # Psychosocial, Relational & Workplace Factors (V / Z Codes)
-            "Z63.0 - Problems in Relationship with Spouse or Partner",
-            "Z63.8 - Other Specified Problems Related to Primary Support Group (Family Conflict)",
-            "Z73.0 - Burn-out / State of Vital Exhaustion",
-            "Z56.6 - Other Physical and Mental Strain Related to Work",
-            "Z55.9 - Problems Related to Education and Literacy, Unspecified"
+            # Psychosocial, Relational & Workplace Factors (Z-Codes / Non-PMB)
+            "Z73.0 - Burn-out / State of Vital Exhaustion (Non-PMB)",
+            "Z56.6 - Other Physical and Mental Strain Related to Work (Non-PMB)",
+            "Z63.0 - Problems in Relationship with Spouse or Partner (Non-PMB)",
+            "Z63.1 - Problems in Relationship with Parents and In-Laws (Non-PMB)",
+            "Z63.2 - Inadequate Family Support / Household Isolation (Non-PMB)",
+            "Z63.3 - Absence of Family Member (Stressful Household Event - Non-PMB)",
+            "Z63.5 - Disruption of Family by Separation and Divorce (Non-PMB)",
+            "Z63.8 - Other Specified Problems Related to Primary Support Group (Non-PMB)",
+            "Z55.9 - Problems Related to Education and Literacy, Unspecified (Non-PMB)"
         ]
     )
+
 
     is_pmb_default = "PMB Eligible" in icd10
     if is_pmb_default:
@@ -497,50 +577,86 @@ with col_left:
     
     selected_symptoms = []
 
-    with sc1:
-        st.caption("Affective & Psychological")
-        if st.checkbox("Persistent low mood / Dysphoria", value=True):
-            selected_symptoms.append("Persistent low mood")
-        if st.checkbox("Separation distress / Intense yearning", value=True):
-            selected_symptoms.append("Separation distress & yearning")
-        if st.checkbox("Anhedonia / Loss of pleasure or motivation"):
-            selected_symptoms.append("Anhedonia / Loss of pleasure")
-        if st.checkbox("Excessive guilt / Feelings of worthlessness"):
-            selected_symptoms.append("Excessive guilt & worthlessness")
-        if st.checkbox("Emotional numbness / Dissociative detachment"):
-            selected_symptoms.append("Emotional numbness & detachment")
-        if st.checkbox("Preoccupation with loss / Rumination"):
-            selected_symptoms.append("Loss-related rumination")
+with sc1:
+    st.caption("Affective, Mood & Risk")
+    if st.checkbox("Persistent low mood / Dysphoria"):
+        selected_symptoms.append("Persistent low mood / Dysphoria")
+    if st.checkbox("Anhedonia / Loss of pleasure or motivation"):
+        selected_symptoms.append("Anhedonia & loss of motivation")
+    if st.checkbox("Elevated / Expansive mood / Racing thoughts"):
+        selected_symptoms.append("Elevated mood / Flight of ideas")
+    if st.checkbox("Excessive guilt / Feelings of worthlessness"):
+        selected_symptoms.append("Excessive guilt & worthlessness")
+    if st.checkbox("Separation distress / Intense yearning"):
+        selected_symptoms.append("Separation distress & grief yearning")
+    if st.checkbox("Preoccupation with loss / Rumination"):
+        selected_symptoms.append("Loss-related rumination")
+    if st.checkbox("Irritability / Anger outbursts / Frustration"):
+        selected_symptoms.append("Irritability & anger outbursts")
+    if st.checkbox("Emotional numbness / Dissociative detachment"):
+        selected_symptoms.append("Emotional numbness & detachment")
+    if st.checkbox("Hopelessness / Helplessness / Pessimism"):
+        selected_symptoms.append("Hopelessness & helplessness")
+    if st.checkbox("Self-criticism / Self-blame / Self-punishment"):
+        selected_symptoms.append("Self-criticism & self-blame")
+    if st.checkbox("Ruminative worry / Catastrophizing / Overthinking"):
+        selected_symptoms.append("Ruminative worry & catastrophizing")            
+    if st.checkbox("Tears, crying spells / Emotional lability"):
+        selected_symptoms.append("Tearfulness & emotional lability")
+    if st.checkbox("Suicidal ideation / Self-harm thoughts"):
+        selected_symptoms.append("Suicidal ideation & self-harm risk")
+    if st.checkbox("Homicidal ideation / Violent impulses / Harm to others"):
+        selected_symptoms.append("Risk of harm to others / Aggressive impulses")
 
-    with sc2:
-        st.caption("Somatic & Vegetative")
-        if st.checkbox("Sleep disruption (Initial/Terminal insomnia)", value=True):
-            selected_symptoms.append("Sleep disruption / Insomnia")
-        if st.checkbox("Chronic fatigue / Loss of physical energy"):
-            selected_symptoms.append("Chronic fatigue / Energy loss")
-        if st.checkbox("Muscle tension / Tension headaches / Body aches"):
-            selected_symptoms.append("Somatic muscle tension & headaches")
-        if st.checkbox("Autonomic arousal (Palpitations / Dyspnea / Tremors)"):
-            selected_symptoms.append("Autonomic anxiety arousal")
-        if st.checkbox("Gastrointestinal distress / Appetite alterations"):
-            selected_symptoms.append("Gastrointestinal / Appetite changes")
-        if st.checkbox("Psychomotor agitation or retardation"):
-            selected_symptoms.append("Psychomotor changes")
+with sc2:
+    st.caption("Somatic, Vegetative & Eating")
+    if st.checkbox("Sleep disruption (Initial/Middle/Terminal insomnia)"):
+        selected_symptoms.append("Insomnia / Sleep disruption")
+    if st.checkbox("Decreased need for sleep (without daytime fatigue)"):
+        selected_symptoms.append("Decreased need for sleep (hypomanic marker)")
+    if st.checkbox("Chronic fatigue / Loss of physical energy"):
+        selected_symptoms.append("Chronic fatigue & anergia")
+    if st.checkbox("Panic surges / Sudden peaks of acute terror"):
+        selected_symptoms.append("Discrete panic surges")
+    if st.checkbox("Autonomic arousal (Palpitations / Dyspnea / Tremors)"):
+        selected_symptoms.append("Autonomic anxiety arousal")
+    if st.checkbox("Muscle tension / Tension headaches / Body aches"):
+        selected_symptoms.append("Somatic muscle tension & headaches")
+    if st.checkbox("Appetite / Weight changes (Significant loss or gain)"):
+        selected_symptoms.append("Appetite & weight fluctuations")
+    if st.checkbox("Binge eating / Purging / Compensatory fasting"):
+        selected_symptoms.append("Bingeing/purging compensatory behaviors")
+    if st.checkbox("Psychomotor agitation or retardation"):
+        selected_symptoms.append("Psychomotor alterations")
+    if st.checkbox("Gastrointestinal distress / Somatosensory amplifying"):
+        selected_symptoms.append("Gastrointestinal distress & pain amplification")
+    if st.checkbox("Sexual dysfunction / Loss of libido"):
+        selected_symptoms.append("Sexual dysfunction / Libido loss")
 
-    with sc3:
-        st.caption("Neurocognitive & Trauma/Functional")
-        if st.checkbox("Executive dysfunction / Brain fog / Focus lapses"):
-            selected_symptoms.append("Concentration & executive lapses")
-        if st.checkbox("Working memory deficits / Forgetfulness"):
-            selected_symptoms.append("Working memory deficits")
-        if st.checkbox("Hyperarousal / Hypervigilance / Panic reactivity"):
-            selected_symptoms.append("Hyperarousal & hypervigilance")
-        if st.checkbox("Avoidance behaviour (Reminders / Situations / People)"):
-            selected_symptoms.append("Active avoidance behaviour")
-        if st.checkbox("Intrusive memories / Traumatic flashbacks"):
-            selected_symptoms.append("Intrusive recollections")
-        if st.checkbox("Occupational / Academic / Relational impairment"):
-            selected_symptoms.append("Functional occupational/relational impairment")
+with sc3:
+    st.caption("Cognitive, Trauma & Reality Testing")
+    if st.checkbox("Executive dysfunction / Brain fog / Focus lapses"):
+        selected_symptoms.append("Concentration & executive lapses")
+    if st.checkbox("Working memory deficits / Forgetfulness"):
+        selected_symptoms.append("Working memory deficits")
+    if st.checkbox("Obsessive intrusive thoughts / Compulsive rituals"):
+        selected_symptoms.append("Obsessive thoughts & compulsive rituals")
+    if st.checkbox("Auditory/Visual hallucinations / Perceptual disturbances"):
+        selected_symptoms.append("Perceptual disturbances / Hallucinations")
+    if st.checkbox("Paranoid ideation / Delusions / Impaired reality testing"):
+        selected_symptoms.append("Paranoid / Delusional ideation")
+    if st.checkbox("Hypervigilance / Exaggerated startle response"):
+        selected_symptoms.append("Hypervigilance & startle reactivity")
+    if st.checkbox("Intrusive traumatic memories / Flashbacks / Nightmares"):
+        selected_symptoms.append("Intrusive traumatic recollections & nightmares")
+    if st.checkbox("Active avoidance behaviour (Triggers / People / Reminders)"):
+        selected_symptoms.append("Active phobic/trauma avoidance")
+    if st.checkbox("Functional impairment (Occupational / Academic / Relational)"):
+        selected_symptoms.append("Functional impairment across life domains")
+    if st.checkbox("Substance use / Alcohol or prescription drug misuse"):
+        selected_symptoms.append("Substance / Medication misuse")
+    if st.checkbox("Self-neglect / Impaired basic self-care"):
+        selected_symptoms.append("Self-neglect & compromised self-care")
 
     if not selected_symptoms:
         selected_symptoms = ["Bereavement-related adjustment difficulties"]
@@ -597,24 +713,39 @@ with col_left:
         }
 
 # === COLUMN 2: REVIEW, CUSTOMIZE & EXPORT ===
+# === COLUMN 2: REVIEW, CUSTOMIZE & EXPORT ===
 with col_right:
-    st.subheader(f"2. {report_type} Content")
+  st.subheader(f"2. {report_type} Content")
 
-    # Date-stamped Session Progression Log configuration
-    d_col1, d_col2 = st.columns(2)
-    with d_col1:
-        start_date = st.date_input("First Session Date:", datetime.date.today() - datetime.timedelta(days=21))
-    with d_col2:
-        session_count = st.slider("Documented Sessions (Up to 20):", min_value=1, max_value=20, value=4)
+  # --- Manual / Non-Sequential Session Date Selector ---
+  st.caption("Documented Consultation Dates")
 
-    curr_date = start_date
-    if curr_date.weekday() >= 5:
-        curr_date += datetime.timedelta(days=(7 - curr_date.weekday()))
+  # Use st.date_input with a list or single date selection
+  # Clinicians can either pick dates sequentially or select individual dates
+  session_count = st.number_input(
+      "Documented Sessions Count", min_value=1, max_value=20, value=4, step=1
+  )
 
-    session_dates = [
-        (curr_date + datetime.timedelta(days=7 * i)).strftime("%Y-%m-%d")
-        for i in range(int(session_count))
-    ]
+  # Let clinician freely pick the dates via an expandable section or dynamic pickers
+  session_dates = []
+  with st.expander("Edit Consultation Dates", expanded=True):
+    date_cols = st.columns(2)
+    base_date = datetime.date.today()
+
+    for i in range(int(session_count)):
+      col_idx = i % 2
+      with date_cols[col_idx]:
+        # Defaults each session spaced out, but calendar allows picking ANY arbitrary date
+        picked_date = st.date_input(
+            f"Session {i+1} Date",
+            value=base_date - datetime.timedelta(weeks=(session_count - 1 - i)),
+            key=f"session_date_picker_{i}",
+            format="YYYY/MM/DD",
+        )
+        session_dates.append(picked_date.strftime("%Y-%m-%d"))
+
+  # session_dates is now an array of whatever dates the clinician picked:
+  # e.g. ['2026-08-03', '2026-08-07', '2026-08-28', '2026-09-15'] 
 
     # Helper function to synchronize both clinical_logic and clinical_copilot outputs
     def _run_full_synthesis():

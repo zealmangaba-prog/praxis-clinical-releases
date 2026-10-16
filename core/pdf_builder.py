@@ -11,6 +11,7 @@ Supports:
 
 import io
 import datetime
+from reportlab.platypus import Image 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import (
@@ -97,24 +98,51 @@ def build_clinical_pdf(
 
     story = []
 
-    # 1. Header
-    story.append(Paragraph(f"CLINICAL {report_type.upper()}", title_style))
-    prac_header = (
-        f"<b>{practitioner['name']}</b> | {practitioner['designation']}<br/>"
-        f"Practice No (BHF): {practitioner['practice_number']} | {practitioner.get('address', '')}"
+    # 1. Professional Header & Letterhead
+    # Format title cleanly without duplicate 'CLINICAL' prefix
+    clean_title = report_type.upper().strip()
+    if not clean_title.startswith('CLINICAL'):
+        clean_title = f'CLINICAL {clean_title}'
+    story.append(Paragraph(clean_title, title_style))
+    story.append(Spacer(1, 4))
+
+    # Structured Practitioner Letterhead Block
+    prac_html = (
+        f"<b><font size='10.5'>{practitioner.get('name', '')}</font></b> | "
+        f"<font color='#444444'>{practitioner.get('designation', '')}</font><br/>"
+        f"<b>BHF Practice No:</b> {practitioner.get('practice_number', 'N/A')} &nbsp;|&nbsp; "
+        f"<b>Tel:</b> {practitioner.get('phone', 'N/A')} &nbsp;|&nbsp; "
+        f"<b>Email:</b> {practitioner.get('email', 'N/A')}<br/>"
+        f"<b>Rooms:</b> {practitioner.get('address', 'N/A')}"
     )
-    story.append(Paragraph(prac_header, sub_style))
+    story.append(Paragraph(prac_html, sub_style))
+    story.append(Spacer(1, 10))
 
     # 2. ALWAYS-PRESENT: Patient Demographics Block (Single Column, No Table)
     doctor_ref_str = patient.get('doctor', 'N/A')
     if patient.get('doctor_pr'):
         doctor_ref_str += f" (BHF: {patient['doctor_pr']})"
 
+    # Format Admission and Discharge Dates
+    adm_val = patient.get('admission_date')
+    if hasattr(adm_val, 'strftime'):
+        adm_date_str = adm_val.strftime("%Y-%m-%d")
+    else:
+        adm_date_str = str(adm_val) if adm_val else "N/A"
+
+    dis_val = patient.get('discharge_date')
+    if hasattr(dis_val, 'strftime'):
+        dis_date_str = dis_val.strftime("%Y-%m-%d")
+    elif dis_val:
+        dis_date_str = str(dis_val)
+    else:
+        dis_date_str = "Ongoing / Active Impatient" 
+        
     demo_lines = [
         f"<b>Patient Name / ID:</b> {patient['patient_name']} ({patient['case_number']})",
         f"<b>Referring Doctor:</b> {doctor_ref_str}",
-        f"<b>Admission Date:</b> {patient.get('admission_date', 'N/A')}",
-        f"<b>Discharge Date:</b> {patient.get('discharge_date', 'N/A')}",
+        f"<b>Admission Date:</b> {adm_date_str}",
+        f"<b>Discharge Date:</b> {dis_date_str}",
         f"<b>Medical Scheme:</b> {patient.get('scheme', 'N/A')}",
         f"<b>Membership Number:</b> {patient.get('membership_no', 'N/A')}",
         f"<b>Dependant Code:</b> {patient.get('dependant_code', '00')}"
@@ -127,7 +155,7 @@ def build_clinical_pdf(
         story.append(Spacer(1, 2))
 
     story.append(Spacer(1, 6))
-    
+
     # 3. Dedicated Medical Aid Claim Voucher (Reserved for the Sticker Only)
     if sticker_data:
         pmb_flag = "YES (PMB Statutory Benefit)" if sticker_data.get("is_pmb") else "NO (Standard Scheme Benefit)"
@@ -258,12 +286,42 @@ def build_clinical_pdf(
     story.append(Spacer(1, 14))
 
     # 7. Signature Block
-    sig_block = [
-        Paragraph("________________________________________", body_style),
-        Paragraph(f"<b>{practitioner['name']}</b>", body_style),
-        Paragraph(practitioner['designation'], body_style),
-        Paragraph(f"BHF Practice No: {practitioner['practice_number']}", body_style)
-    ]
+    from PIL import Image as PILImage
+    from reportlab.platypus import Image as RLImage
+
+    sig_block = []
+    sig_data = practitioner.get("signature")
+
+    if sig_data:
+        try:
+            pil_img = PILImage.open(io.BytesIO(sig_data))
+            if pil_img.mode in ("RGBA", "LA", "P"):
+                pil_img = pil_img.convert("RGBA")
+                bg = PILImage.new("RGB", pil_img.size, (255, 255, 255))
+                bg.paste(pil_img, mask=pil_img.split()[3])
+                pil_img = bg
+            else:
+                pil_img = pil_img.convert("RGB")
+
+            img_buf = io.BytesIO()
+            pil_img.save(img_buf, format="PNG")
+            img_buf.seek(0)
+
+            sig_img = RLImage(img_buf, width=130, height=45)
+            sig_img.hAlign = "LEFT"
+            sig_block.append(sig_img)
+            sig_block.append(Spacer(1, 4))
+        except Exception as e:
+            print(f"Signature error: {e}")
+            sig_block.append(Paragraph("________________________________________", body_style))
+    else:
+        sig_block.append(Paragraph("________________________________________", body_style))
+
+    sig_block.extend([
+        Paragraph(f"<b>{practitioner.get('name', '')}</b>", body_style),
+        Paragraph(practitioner.get('designation', ''), body_style),
+        Paragraph(f"BHF Practice No: {practitioner.get('practice_number', '')}", body_style)
+    ])
     story.append(KeepTogether(sig_block))
 
     doc.build(story)

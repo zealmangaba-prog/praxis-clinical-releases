@@ -220,7 +220,12 @@ def synthesize_clinical_narrative(designation: str, icd10: str, modality: str, s
     # 2. Dynamic Session Breakdown
     sessions = []
     for i in range(1, session_count + 1):
-        s_date = dates[i - 1].strftime("%Y-%m-%d") if i - 1 < len(dates) else "2026-01-01"
+        if i - 1 < len(dates):
+            val = dates[i - 1]
+            s_date = val.strftime("%Y-%m-%d") if hasattr(val, "strftime") else str(val)
+        else:
+            s_date = "2026-01-01"
+
         if i == 1:
             target = "Clinical Intake & Assessment" if "Psychologist" in designation else "Intake & Baseline Screening"
             content = f"Comprehensive intake evaluation targeting {sym_str}. Assessed risk, established safety baseline, and structured the {modality} framework."
