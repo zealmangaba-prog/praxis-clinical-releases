@@ -55,17 +55,18 @@ jobs:
           hdiutil create -volname "Praxis Clinical" -srcfolder "dist/Praxis Clinical.app" -ov -format UDZO "Praxis_Clinical_macOS.dmg"
 
       # --- Windows Build Step ---
-      - name: Build Windows Executable
-        if: runner.os == 'Windows'
-        run: |
-          pyinstaller --clean --noconfirm --onedir --windowed `
-            --name "Praxis_Clinical" `
-            --add-data "core;core" `
-            --collect-all streamlit `
-            --exclude-module torch `
-            --exclude-module scipy `
-            --exclude-module pytest `
-            app.py
+      - - name: Build Windows Executable
+  if: runner.os == 'Windows'
+  run: |
+    pyinstaller --noconfirm --onefile --windowed --name "PraxisClinical" `
+      --add-data "core;core" `
+      --add-data "public_key.pem;." `
+      --add-data "app.py;." `
+      --copy-metadata streamlit `
+      --copy-metadata cryptography `
+      --copy-metadata docx `
+      --copy-metadata reportlab `
+      main.py
           Compress-Archive -Path "dist/Praxis_Clinical/*" -DestinationPath "Praxis_Clinical_Windows.zip"
 
       # --- Upload Assets to Release ---
